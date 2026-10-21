@@ -1,28 +1,31 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
+from app.api.auth import router as auth_router
 from app.core.config import settings
-from app.db.session import engine
+from app.database import get_db
 
 app = FastAPI(
     title=settings.app_name,
     debug=settings.debug,
 )
 
+app.include_router(auth_router)
+
+
+@app.get("/")
+def root():
+    return {"message": "RepoPilot AI", "docs": "/docs"}
+
 
 @app.get("/health")
-def health_check():
+def health_check(db: Session = Depends(get_db)):
     try:
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
-
-        return {
-            "status": "healthy",
-            "database": "connected",
-        }
-
+        db.execute(text("SELECT 1"))
+        return {"status": "healthy", "database": "connected"}
     except Exception:
-        return {
-            "status": "unhealthy",
-            "database": "disconnected",
-        }
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        )

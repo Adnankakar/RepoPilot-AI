@@ -1,8 +1,9 @@
 from logging.config import fileConfig
 
 from alembic import context
-from app.db.session import Base
+from app.database import Base
 from app.core.config import settings
+import app.models  # noqa: F401 — registers all models on Base.metadata
 
 from sqlalchemy import create_engine, pool
 
@@ -48,6 +49,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=True,
     )
 
     with context.begin_transaction():
@@ -63,6 +65,7 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
+            compare_type=True,
         )
 
         with context.begin_transaction():
