@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.api.auth import router as auth_router
 from app.core.config import settings
 from app.database import get_db
+from app.api.repositories import router as repositories_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -13,6 +14,7 @@ app = FastAPI(
 
 app.include_router(auth_router)
 
+app.include_router(repositories_router, prefix="/api")
 
 @app.get("/")
 def root():
