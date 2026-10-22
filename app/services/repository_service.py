@@ -16,6 +16,10 @@ from app.models.repository import Repository
 from app.services.clone_service import CloneError, GitNotAvailable, clone_repository
 from app.services.file_discovery_service import discover_files
 from app.services.file_persistence_service import persist_discovered_files
+from app.services.chunk_persistence_service import (
+    generate_and_persist_chunks_for_repository,
+    resolve_commit_sha,
+)
 from app.services.github_provider import (
     GitHubProvider,
     GitHubRepositoryEmpty,
@@ -128,17 +132,31 @@ def register_repository(
         # Discover files in the freshly cloned repository.
         discovery = discover_files(clone_path)
 
-        # Persist metadata — status is only set AFTER this succeeds so
-        # that a DB failure here does not leave "cloned" committed.
+        # Persist metadata and generate code chunks
         try:
             file_count = persist_discovered_files(db, repository.id, discovery)
+            db.flush()
+
+            # Resolve commit SHA from clone or github info
+            commit_sha = resolve_commit_sha(clone_path) or info.latest_commit
+            if commit_sha:
+                repository.indexed_commit = commit_sha
+
+            # Generate and persist chunks for the repository
+            generate_and_persist_chunks_for_repository(
+                db=db,
+                repository_id=repository.id,
+                clone_path=clone_path,
+                commit_sha=commit_sha,
+                cleanup_stale=True,
+            )
         except Exception as exc:
-            # Persistence failed — roll back the file inserts, clean up the
+            # Persistence or chunking failed — roll back the inserts, clean up the
             # clone directory, and record the failure in the status columns.
             db.rollback()
             _cleanup_clone(str(owner_id), repository.id)
             logger.error(
-                "File persistence failed for repository %s: %s",
+                "File persistence or chunking failed for repository %s: %s",
                 repository.id,
                 exc,
             )
