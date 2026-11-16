@@ -24,4 +24,9 @@ class RepositoryResponse(BaseModel):
 class RepositoryRegistrationResponse(BaseModel):
     repository: RepositoryResponse
     indexing_job_id: str
+    job_id: str | None = None
     message: str = Field(default="Repository registered successfully.")
+
+    def model_post_init(self, __context):
+        if self.job_id is None:
+            self.job_id = self.indexing_job_id

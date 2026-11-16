@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.security import hash_password
 from app.models.code_chunk import CodeChunk
+from app.models.indexing_job import IndexingJob, IndexingJobStatus, VALID_STATUSES
 from app.models.repository import Repository
 from app.models.repository_file import RepositoryFile
 from app.models.user import User, UserRole
@@ -222,4 +223,152 @@ def test_code_chunk_cascade_delete_with_repository(db_session):
     db_session.expire_all()
 
     assert db_session.get(CodeChunk, chunk_id) is None
+
+
+def test_create_indexing_job_default_values(db_session):
+    repo = Repository(
+        owner_id=str(uuid4()),
+        provider="github",
+        external_id=str(uuid4()),
+        url="https://github.com/example/repo",
+        default_branch="main",
+        status="pending",
+    )
+    db_session.add(repo)
+    db_session.flush()
+
+    job = IndexingJob(repository_id=repo.id)
+    db_session.add(job)
+    db_session.flush()
+
+    loaded = db_session.get(IndexingJob, job.id)
+    assert loaded is not None
+    assert loaded.id is not None
+    assert len(loaded.id) == 36
+    assert loaded.repository_id == repo.id
+    assert loaded.status == "queued"
+    assert loaded.attempt_count == 0
+    assert loaded.started_at is None
+    assert loaded.finished_at is None
+    assert loaded.error_summary is None
+    assert loaded.failed_stage is None
+    assert loaded.created_at is not None
+
+
+def test_indexing_job_valid_states(db_session):
+    repo = Repository(
+        owner_id=str(uuid4()),
+        provider="github",
+        external_id=str(uuid4()),
+        url="https://github.com/example/repo",
+        default_branch="main",
+        status="pending",
+    )
+    db_session.add(repo)
+    db_session.flush()
+
+    for valid_status in VALID_STATUSES:
+        job = IndexingJob(repository_id=repo.id, status=valid_status)
+        db_session.add(job)
+        db_session.flush()
+
+        loaded = db_session.get(IndexingJob, job.id)
+        assert loaded.status == valid_status
+
+    # Also test enum members
+    assert IndexingJobStatus.QUEUED == "queued"
+    assert IndexingJobStatus.RUNNING == "running"
+    assert IndexingJobStatus.FAILED == "failed"
+    assert IndexingJobStatus.COMPLETED == "completed"
+
+
+def test_indexing_job_status_check_constraint(db_session):
+    repo = Repository(
+        owner_id=str(uuid4()),
+        provider="github",
+        external_id=str(uuid4()),
+        url="https://github.com/example/repo",
+        default_branch="main",
+        status="pending",
+    )
+    db_session.add(repo)
+    db_session.flush()
+
+    job = IndexingJob(repository_id=repo.id, status="invalid_status")
+    db_session.add(job)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+    db_session.rollback()
+
+
+def test_indexing_job_foreign_key_cascade_delete(db_session):
+    repo = Repository(
+        owner_id=str(uuid4()),
+        provider="github",
+        external_id=str(uuid4()),
+        url="https://github.com/example/repo",
+        default_branch="main",
+        status="pending",
+    )
+    db_session.add(repo)
+    db_session.flush()
+
+    job = IndexingJob(repository_id=repo.id)
+    db_session.add(job)
+    db_session.flush()
+    job_id = job.id
+
+    db_session.delete(repo)
+    db_session.flush()
+    db_session.expire_all()
+
+    assert db_session.get(IndexingJob, job_id) is None
+
+
+def test_indexing_job_fields_update(db_session):
+    from datetime import datetime, timezone
+
+    repo = Repository(
+        owner_id=str(uuid4()),
+        provider="github",
+        external_id=str(uuid4()),
+        url="https://github.com/example/repo",
+        default_branch="main",
+        status="pending",
+    )
+    db_session.add(repo)
+    db_session.flush()
+
+    job = IndexingJob(repository_id=repo.id)
+    db_session.add(job)
+    db_session.flush()
+
+    # Transition to running
+    now = datetime.now(timezone.utc)
+    job.status = IndexingJobStatus.RUNNING
+    job.started_at = now
+    job.attempt_count = 1
+    db_session.flush()
+
+    loaded = db_session.get(IndexingJob, job.id)
+    assert loaded.status == "running"
+    assert loaded.started_at == now
+    assert loaded.attempt_count == 1
+
+    # Transition to failed
+    finish_time = datetime.now(timezone.utc)
+    job.status = IndexingJobStatus.FAILED
+    job.finished_at = finish_time
+    job.failed_stage = "clone"
+    job.error_summary = "Authentication failed"
+    db_session.flush()
+
+    loaded = db_session.get(IndexingJob, job.id)
+    assert loaded.status == "failed"
+    assert loaded.finished_at == finish_time
+    assert loaded.failed_stage == "clone"
+    assert loaded.error_summary == "Authentication failed"
+
 
