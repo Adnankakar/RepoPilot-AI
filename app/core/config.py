@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     # below which retrieved chunks are considered irrelevant noise.
     retrieval_similarity_threshold: float = 0.50
 
+    # LLM Service configuration
+    llm_provider: str = "openrouter"
+    llm_model: str = "particle-ai/particle-1:free"
+    openrouter_api_key: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
