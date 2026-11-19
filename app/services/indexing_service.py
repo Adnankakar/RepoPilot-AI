@@ -33,6 +33,8 @@ from app.models.repository_file_skip import RepositoryFileSkip
 from app.services.chunk_persistence_service import resolve_commit_sha
 from app.services.chunking_service import chunk_content
 from app.services.clone_service import CloneError, GitNotAvailable, clone_repository
+from app.services.embedding_provider import EmbeddingProvider
+from app.services.embedding_service import generate_embeddings_for_repository
 from app.services.file_discovery_service import DiscoveryResult, discover_files
 from app.services.github_provider import (
     GitHubRepositoryEmpty,
@@ -135,7 +137,11 @@ def _cleanup_clone(owner_id: str, repository_id: str) -> None:
             logger.warning("Could not remove clone directory %s: %s", clone_dir, exc)
 
 
-def run_pipeline(db: Session, repository: Repository) -> DiscoveryResult:
+def run_pipeline(
+    db: Session,
+    repository: Repository,
+    embedding_provider: EmbeddingProvider | None = None,
+) -> DiscoveryResult:
     """
     Execute the full ingestion pipeline for *repository* with staging & atomic swap.
 
@@ -270,6 +276,40 @@ def run_pipeline(db: Session, repository: Repository) -> DiscoveryResult:
         db.rollback()
         _cleanup_clone(owner_id, repo_id)
         raise PipelineError("store", str(exc), cause=exc) from exc
+
+    # ------------------------------------------------------------------ #
+    # Stage 5: embed (optional; only when a provider is supplied)
+    # ------------------------------------------------------------------ #
+    # Embedding is best-effort enrichment that runs after the chunks are
+    # durably flushed. It never raises out of run_pipeline: a failure here
+    # (e.g. the pgvector extension not yet installed, or a provider error) is
+    # isolated by a savepoint so the already-stored chunks remain intact and
+    # the indexing job still succeeds. Embeddings can be backfilled later.
+    if embedding_provider is not None:
+        try:
+            with db.begin_nested():
+                embed_result = generate_embeddings_for_repository(
+                    db=db,
+                    repository_id=repo_id,
+                    provider=embedding_provider,
+                )
+                db.flush()
+            logger.info(
+                "Embedding stage for repository %s: embedded=%d skipped=%d "
+                "failed=%d total=%d",
+                repo_id,
+                embed_result.embedded,
+                embed_result.skipped,
+                embed_result.failed,
+                embed_result.total_chunks,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Embedding stage failed for repository %s (chunks remain "
+                "stored, embeddings can be backfilled): %s",
+                repo_id,
+                exc,
+            )
 
     # Cleanup local clone upon successful completion
     _cleanup_clone(owner_id, repo_id)

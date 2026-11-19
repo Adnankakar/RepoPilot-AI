@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models.indexing_job import IndexingJob
 from app.models.repository import Repository
+from app.services.embedding_provider import EmbeddingProvider, get_embedding_provider
 from app.services.indexing_service import (
     PipelineError,
     is_permanent_error,
@@ -50,6 +51,26 @@ logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
 
 SessionFactory = Callable[[], Session]
+
+
+def _get_embedding_provider() -> EmbeddingProvider | None:
+    """Return the shared embedding provider, or None if it cannot initialize.
+
+    Embedding is best-effort enrichment: if the provider cannot be acquired we
+    disable embedding for this job (run_pipeline skips the embed stage when the
+    provider is None) instead of failing the whole indexing job. The shared
+    factory caches a single provider instance and the underlying model is loaded
+    once per process, so this never triggers duplicate model loading.
+    """
+    try:
+        return get_embedding_provider()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(
+            "Could not initialize embedding provider; embeddings will be "
+            "skipped: %s",
+            exc,
+        )
+        return None
 
 
 def _utc_now() -> datetime:
@@ -341,7 +362,14 @@ def _execute_claimed_job(
             if repo is None:
                 raise PipelineError("setup", f"Repository {repository_id} not found", is_permanent=True)
 
-            discovery = run_pipeline(db, repo)
+            # Embeddings run as a best-effort final stage of run_pipeline, after
+            # the chunks have been flushed. Passing the provider enables it;
+            # None (e.g. if the provider could not be initialized) skips it.
+            # run_pipeline isolates embedding failures in a savepoint so they
+            # never fail the indexing job.
+            discovery = run_pipeline(
+                db, repo, embedding_provider=_get_embedding_provider()
+            )
             repo.status = "partial" if discovery.stop_reason else "completed"
             db.commit()
         except Exception:

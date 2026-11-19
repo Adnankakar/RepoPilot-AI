@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -9,6 +10,28 @@ from app.database import Base
 
 def utc_now():
     return datetime.now(timezone.utc)
+
+
+class VectorType(Vector):
+    """
+    Subclass of pgvector Vector that gracefully deserializes both native pgvector
+    representations and JSON array representations.
+    """
+    cache_ok = True
+
+    def result_processor(self, dialect, coltype):
+        base_processor = super().result_processor(dialect, coltype)
+
+        def process(value):
+            if value is None:
+                return None
+            if isinstance(value, list):
+                return [float(x) for x in value]
+            if base_processor:
+                return base_processor(value)
+            return value
+
+        return process
 
 
 class CodeChunk(Base):
@@ -48,7 +71,11 @@ class CodeChunk(Base):
     start_line: Mapped[int] = mapped_column(Integer, nullable=False)
     end_line: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    # Dense embedding vector (all-MiniLM-L6-v2 -> 384 dims). Stored with
+    # pgvector; NULL until the Module 6 embedding pipeline populates it.
+    embedding: Mapped[list[float] | None] = mapped_column(
+        VectorType(384), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )

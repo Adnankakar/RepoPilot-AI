@@ -33,6 +33,26 @@ class Settings(BaseSettings):
     # Default: 300 s (5 min). Override with MAX_DISCOVERY_SECONDS in .env.
     max_discovery_seconds: float = 300.0
 
+    # Number of code chunks embedded per provider call. Bounding the batch
+    # keeps memory predictable and lets the provider vectorise efficiently.
+    # Default: 32. Override with EMBEDDING_BATCH_SIZE in .env.
+    embedding_batch_size: int = 32
+
+    # Embedding provider: "local" (sentence-transformers), "openai", or "voyage"
+    # Default: "local". Override with EMBEDDING_PROVIDER in .env.
+    embedding_provider: str = "local"
+
+    # Embedding model name.
+    # Default: "all-MiniLM-L6-v2". Override with EMBEDDING_MODEL in .env.
+    embedding_model: str = "all-MiniLM-L6-v2"
+
+    # API keys for remote embedding providers
+    openai_api_key: str | None = None
+    voyage_api_key: str | None = None
+
+    # Expected vector dimension. Defaults to 384 for all-MiniLM-L6-v2.
+    embedding_dimension: int = 384
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

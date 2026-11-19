@@ -745,3 +745,56 @@ class TestListIndexingJobsEndpoint:
         jobs = res.json()
         assert isinstance(jobs, list)
         assert len(jobs) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Worker: Module 6 embedding provider integration
+# ---------------------------------------------------------------------------
+
+class TestEmbeddingIntegration:
+    """The worker must pass the shared embedding provider into run_pipeline so
+    embeddings run after chunks are saved, while never letting embedding
+    failures (or provider init failures) break indexing."""
+
+    def test_run_indexing_job_passes_embedding_provider(self, db_session):
+        repo = _make_repo(db_session)
+        job = _make_job(db_session, repo)
+        db_session.flush()
+        factory = _session_factory(db_session)
+
+        with patch(
+            "app.worker.indexing_worker.run_pipeline",
+            return_value=_good_discovery(),
+        ) as mock_pipeline:
+            run_indexing_job(job.id, factory)
+
+        assert mock_pipeline.called
+        _, kwargs = mock_pipeline.call_args
+        assert "embedding_provider" in kwargs
+        # The shared provider is initialized (not None) — embeddings enabled.
+        assert kwargs["embedding_provider"] is not None
+        assert job.status == "completed"
+
+    def test_run_indexing_job_skips_embedding_when_provider_init_fails(self, db_session):
+        repo = _make_repo(db_session)
+        job = _make_job(db_session, repo)
+        db_session.flush()
+        factory = _session_factory(db_session)
+
+        with (
+            patch(
+                "app.worker.indexing_worker.get_embedding_provider",
+                side_effect=RuntimeError("provider init boom"),
+            ),
+            patch(
+                "app.worker.indexing_worker.run_pipeline",
+                return_value=_good_discovery(),
+            ) as mock_pipeline,
+        ):
+            run_indexing_job(job.id, factory)
+
+        # Provider init failed -> embedding disabled (None) but indexing still
+        # completes normally.
+        _, kwargs = mock_pipeline.call_args
+        assert kwargs.get("embedding_provider") is None
+        assert job.status == "completed"
