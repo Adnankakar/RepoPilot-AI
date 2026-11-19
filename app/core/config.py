@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     # Expected vector dimension. Defaults to 384 for all-MiniLM-L6-v2.
     embedding_dimension: int = 384
 
+    # Retrieval Service configuration
+    # Default maximum number of chunks to retrieve per question
+    retrieval_top_k: int = 5
+    # Insufficient-evidence threshold: minimum cosine similarity score (0.0 to 1.0)
+    # below which retrieved chunks are considered irrelevant noise.
+    retrieval_similarity_threshold: float = 0.50
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

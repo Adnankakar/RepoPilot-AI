@@ -30,7 +30,9 @@ Design:
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
+from typing import Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -189,33 +191,109 @@ def _embed_batch(
         result.embedded += 1
 
 
+def _cosine_distance(u: list[float], v: list[float]) -> float:
+    """Compute cosine distance between two float vectors in Python."""
+    dot = 0.0
+    norm_u = 0.0
+    norm_v = 0.0
+    for a, b in zip(u, v):
+        dot += a * b
+        norm_u += a * a
+        norm_v += b * b
+    if norm_u <= 0.0 or norm_v <= 0.0:
+        return 1.0
+    sim = dot / (math.sqrt(norm_u) * math.sqrt(norm_v))
+    sim = max(-1.0, min(1.0, sim))
+    return 1.0 - sim
+
+
+def _search_similar_chunks_fallback(
+    db: Session,
+    query_vector: list[float],
+    repository_ids: Sequence[str] | None = None,
+    limit: int = 10,
+) -> list[tuple[CodeChunk, float]]:
+    """In-memory cosine distance fallback when pgvector is not available in database."""
+    stmt = select(CodeChunk).where(CodeChunk.embedding.is_not(None))
+    if repository_ids is not None:
+        if len(repository_ids) == 1:
+            stmt = stmt.where(CodeChunk.repository_id == repository_ids[0])
+        else:
+            stmt = stmt.where(CodeChunk.repository_id.in_(list(repository_ids)))
+
+    chunks = list(db.scalars(stmt).all())
+    scored: list[tuple[CodeChunk, float]] = []
+    for c in chunks:
+        if c.embedding is not None:
+            vec = [float(x) for x in c.embedding]
+            dist = _cosine_distance(query_vector, vec)
+            scored.append((c, dist))
+
+    scored.sort(key=lambda item: item[1])
+    return scored[:limit]
+
+
 def search_similar_chunks(
     db: Session,
     query_vector: list[float],
     repository_id: str | None = None,
+    repository_ids: Sequence[str] | None = None,
     limit: int = 10,
 ) -> list[tuple[CodeChunk, float]]:
     """
-    Search for stored code chunks most similar to a query vector using pgvector cosine distance.
+    Search for stored code chunks most similar to a query vector using pgvector cosine distance,
+    with an automatic in-memory fallback if the pgvector extension is not compiled into the database.
 
     Parameters:
         db: Active SQLAlchemy session.
         query_vector: Dense vector representing the search query.
-        repository_id: Optional repository filter.
+        repository_id: Optional single repository filter (legacy / shorthand).
+        repository_ids: Optional collection of repository IDs to filter chunks by.
         limit: Maximum number of chunks to return.
 
     Returns:
         List of tuples: (CodeChunk, cosine_distance) sorted in ascending order of distance
         (smallest distance = highest semantic similarity).
     """
-    distance = CodeChunk.embedding.cosine_distance(query_vector)
-    stmt = (
-        select(CodeChunk, distance.label("distance"))
-        .where(CodeChunk.embedding.is_not(None))
-    )
-    if repository_id is not None:
-        stmt = stmt.where(CodeChunk.repository_id == repository_id)
+    target_repo_ids: list[str] | None = None
+    if repository_ids is not None:
+        target_repo_ids = list(repository_ids)
+    elif repository_id is not None:
+        target_repo_ids = [repository_id]
 
-    stmt = stmt.order_by(distance).limit(limit)
-    rows = db.execute(stmt).all()
-    return [(chunk, float(dist)) for chunk, dist in rows]
+    try:
+        with db.begin_nested():
+            distance = CodeChunk.embedding.cosine_distance(query_vector)
+            stmt = (
+                select(CodeChunk, distance.label("distance"))
+                .where(CodeChunk.embedding.is_not(None))
+            )
+            if target_repo_ids is not None:
+                if len(target_repo_ids) == 1:
+                    stmt = stmt.where(CodeChunk.repository_id == target_repo_ids[0])
+                else:
+                    stmt = stmt.where(CodeChunk.repository_id.in_(target_repo_ids))
+
+            stmt = stmt.order_by(distance).limit(limit)
+            rows = db.execute(stmt).all()
+            return [(chunk, float(dist)) for chunk, dist in rows]
+    except Exception as exc:
+        err_msg = str(exc).lower()
+        if (
+            "vector" in err_msg
+            or "operator does not exist" in err_msg
+            or "extension" in err_msg
+            or "no such function" in err_msg
+            or "syntax error" in err_msg
+        ):
+            logger.info(
+                "pgvector distance query not available in database (%s); using in-memory vector similarity fallback.",
+                exc,
+            )
+            return _search_similar_chunks_fallback(
+                db=db,
+                query_vector=query_vector,
+                repository_ids=target_repo_ids,
+                limit=limit,
+            )
+        raise
