@@ -226,6 +226,14 @@ def _search_similar_chunks_fallback(
     for c in chunks:
         if c.embedding is not None:
             vec = [float(x) for x in c.embedding]
+            if len(vec) != len(query_vector):
+                logger.warning(
+                    "Skipping chunk %s with dimension %d != query dimension %d (mismatched embedding model; re-embedding required).",
+                    c.id,
+                    len(vec),
+                    len(query_vector),
+                )
+                continue
             dist = _cosine_distance(query_vector, vec)
             scored.append((c, dist))
 

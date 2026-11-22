@@ -61,6 +61,10 @@ VOYAGE_MODEL_DIMENSIONS: dict[str, int] = {
     "voyage-2": 1024,
 }
 
+OPENROUTER_MODEL_DIMENSIONS: dict[str, int] = {
+    "nvidia/nemotron-3-embed-1b:free": 2048,
+}
+
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -472,6 +476,159 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
 
 
 # ---------------------------------------------------------------------------
+# 4. OpenRouter Embedding Provider
+# ---------------------------------------------------------------------------
+
+
+class OpenRouterEmbeddingProvider(EmbeddingProvider):
+    """
+    Embedding provider backed by OpenRouter's Embeddings API.
+
+    Supported models include:
+    - nvidia/nemotron-3-embed-1b:free (default, 2048 dims)
+    """
+
+    _endpoint = "https://openrouter.ai/api/v1/embeddings"
+
+    def __init__(
+        self,
+        model_name: str | None = None,
+        api_key: str | None = None,
+        dimension: int | None = None,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        client: Any | None = None,
+    ) -> None:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be a positive integer.")
+        self.model_name = model_name or settings.embedding_model or "nvidia/nemotron-3-embed-1b:free"
+        self.api_key = api_key or settings.openrouter_api_key
+        self.batch_size = batch_size
+        self._client = client
+
+        # Determine dimensionality
+        if dimension is not None:
+            self._dimension = dimension
+        else:
+            self._dimension = OPENROUTER_MODEL_DIMENSIONS.get(self.model_name, 2048)
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
+        if texts is None:
+            raise ValueError("texts must not be None.")
+
+        texts_list = list(texts)
+        if not texts_list:
+            return []
+
+        if not self.api_key and self._client is None:
+            raise EmbeddingAuthenticationError(
+                "OpenRouter API key is missing. Set OPENROUTER_API_KEY in the environment or .env."
+            )
+
+        vectors: list[list[float]] = []
+
+        # Process in chunks of batch_size
+        for i in range(0, len(texts_list), self.batch_size):
+            chunk = texts_list[i : i + self.batch_size]
+            vectors.extend(self._call_api(chunk))
+
+        return vectors
+
+    def _call_api(self, texts: list[str]) -> list[list[float]]:
+        # If a mock client was injected, call it directly
+        if self._client is not None:
+            try:
+                if hasattr(self._client, "embeddings"):
+                    response = self._client.embeddings.create(
+                        model=self.model_name,
+                        input=texts,
+                        encoding_format="float",
+                    )
+                    data = getattr(response, "data", [])
+                    sorted_data = sorted(
+                        data,
+                        key=lambda item: (
+                            item.get("index", 0)
+                            if isinstance(item, dict)
+                            else getattr(item, "index", 0)
+                        ),
+                    )
+                    return [
+                        [
+                            float(x)
+                            for x in (
+                                item["embedding"]
+                                if isinstance(item, dict)
+                                else getattr(item, "embedding")
+                            )
+                        ]
+                        for item in sorted_data
+                    ]
+                elif hasattr(self._client, "embed"):
+                    response = self._client.embed(
+                        texts=texts,
+                        model=self.model_name,
+                    )
+                    return [list(vec) for vec in response.embeddings]
+            except Exception as exc:
+                raise EmbeddingError(f"OpenRouter embedding call failed: {exc}") from exc
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload: dict[str, Any] = {
+            "model": self.model_name,
+            "input": texts,
+            "encoding_format": "float",
+        }
+
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                res = client.post(
+                    self._endpoint,
+                    headers=headers,
+                    json=payload,
+                )
+                if res.status_code in (401, 403):
+                    raise EmbeddingAuthenticationError(
+                        f"OpenRouter authentication failed ({res.status_code}): {res.text}"
+                    )
+                if res.status_code != 200:
+                    raise EmbeddingError(
+                        f"OpenRouter API returned status {res.status_code}: {res.text}"
+                    )
+
+                data = res.json().get("data", [])
+                sorted_data = sorted(
+                    data,
+                    key=lambda item: (
+                        item.get("index", 0)
+                        if isinstance(item, dict)
+                        else getattr(item, "index", 0)
+                    ),
+                )
+                return [
+                    [
+                        float(x)
+                        for x in (
+                            item["embedding"]
+                            if isinstance(item, dict)
+                            else getattr(item, "embedding")
+                        )
+                    ]
+                    for item in sorted_data
+                ]
+        except (EmbeddingAuthenticationError, EmbeddingError):
+            raise
+        except Exception as exc:
+            raise EmbeddingError(f"OpenRouter embedding request failed: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
 # Factory and Shared Provider Accessors
 # ---------------------------------------------------------------------------
 
@@ -517,10 +674,17 @@ def create_embedding_provider(
             batch_size=batch_size,
             **kwargs,
         )
+    elif provider_type == "openrouter":
+        return OpenRouterEmbeddingProvider(
+            model_name=model_name or settings.embedding_model or "nvidia/nemotron-3-embed-1b:free",
+            api_key=api_key or settings.openrouter_api_key,
+            batch_size=batch_size,
+            **kwargs,
+        )
     else:
         raise ValueError(
             f"Unknown embedding provider '{provider_type}'. "
-            "Supported providers: 'local', 'openai', 'voyage'."
+            "Supported providers: 'local', 'openai', 'voyage', 'openrouter'."
         )
 
 

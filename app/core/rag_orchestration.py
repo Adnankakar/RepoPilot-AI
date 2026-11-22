@@ -250,6 +250,8 @@ def evaluate_answer(question: str, answer: str) -> bool:
     # If the question is not in the evaluation set, consider it passed.
     return True
 
+
+def answer_question(question: str) -> str:
     """Generate an answer with validated citations.
 
     1. Retrieve evidence.

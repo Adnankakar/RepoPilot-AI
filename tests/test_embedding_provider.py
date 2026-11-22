@@ -31,6 +31,7 @@ from app.services.embedding_provider import (
     EmbeddingProvider,
     LocalEmbeddingProvider,
     OpenAIEmbeddingProvider,
+    OpenRouterEmbeddingProvider,
     VoyageAIEmbeddingProvider,
     create_embedding_provider,
 )
@@ -102,6 +103,8 @@ def test_invalid_batch_size_rejected():
         OpenAIEmbeddingProvider(batch_size=-1)
     with pytest.raises(ValueError):
         VoyageAIEmbeddingProvider(batch_size=0)
+    with pytest.raises(ValueError):
+        OpenRouterEmbeddingProvider(batch_size=0)
 
 
 def test_embed_single_returns_384_floats():
@@ -305,7 +308,54 @@ def test_voyage_embed_empty_batch():
 
 
 # ===========================================================================
-# 5. Provider Factory and Model Swapping
+# 5. OpenRouter Embedding Provider
+# ===========================================================================
+
+
+def test_openrouter_provider_interface_and_dimensions():
+    provider = OpenRouterEmbeddingProvider(
+        model_name="nvidia/nemotron-3-embed-1b:free", api_key="sk-test"
+    )
+    assert isinstance(provider, EmbeddingProvider)
+    assert provider.dimension == 2048
+
+    custom_provider = OpenRouterEmbeddingProvider(
+        model_name="custom-model", dimension=1024, api_key="sk-test"
+    )
+    assert custom_provider.dimension == 1024
+
+
+def test_openrouter_missing_api_key_raises_auth_error():
+    provider = OpenRouterEmbeddingProvider(api_key=None)
+    with patch.object(ep.settings, "openrouter_api_key", None):
+        provider.api_key = None
+        with pytest.raises(EmbeddingAuthenticationError):
+            provider.embed("hello world")
+
+
+def test_openrouter_embed_batch_success_with_mock_client():
+    mock_client = MagicMock()
+    mock_item1 = MagicMock(index=0, embedding=[0.05] * 2048)
+    mock_item2 = MagicMock(index=1, embedding=[0.12] * 2048)
+    mock_client.embeddings.create.return_value = MagicMock(data=[mock_item1, mock_item2])
+
+    provider = OpenRouterEmbeddingProvider(api_key="sk-test", client=mock_client)
+    res = provider.embed_batch(["def search(): pass", "class Index: pass"])
+
+    assert len(res) == 2
+    assert len(res[0]) == 2048
+    assert len(res[1]) == 2048
+    assert res[0][0] == 0.05
+    assert res[1][0] == 0.12
+
+
+def test_openrouter_embed_empty_batch():
+    provider = OpenRouterEmbeddingProvider(api_key="sk-test")
+    assert provider.embed_batch([]) == []
+
+
+# ===========================================================================
+# 6. Provider Factory and Model Swapping
 # ===========================================================================
 
 
@@ -324,6 +374,15 @@ def test_create_embedding_provider_swapping():
     voyage_p = create_embedding_provider(provider_type="voyage", api_key="test-key")
     assert isinstance(voyage_p, VoyageAIEmbeddingProvider)
     assert voyage_p.dimension == 1024
+
+    # OpenRouter provider
+    openrouter_p = create_embedding_provider(
+        provider_type="openrouter",
+        model_name="nvidia/nemotron-3-embed-1b:free",
+        api_key="sk-test",
+    )
+    assert isinstance(openrouter_p, OpenRouterEmbeddingProvider)
+    assert openrouter_p.dimension == 2048
 
 
 def test_create_embedding_provider_unknown_raises():

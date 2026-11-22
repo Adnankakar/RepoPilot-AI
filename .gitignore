@@ -5,3 +5,15 @@ __pycache__/
 .pytest_cache/
 .coverage
 development_notes.md
+# Temporary cloned repositories
+clones/
+
+# Environment variables
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Node modules
+node_modules/
