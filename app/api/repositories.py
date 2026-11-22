@@ -1,10 +1,16 @@
+import logging
+import shutil
+from pathlib import Path
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.core.config import settings
 from app.core.repository_security import RepositoryURLValidationError
 from app.db.session import get_db
+from app.models.code_chunk import CodeChunk
 from app.models.indexing_job import IndexingJob
 from app.models.repository import Repository
 from app.models.repository_file import RepositoryFile
@@ -31,6 +37,8 @@ from app.services.repository_service import (
     register_repository,
 )
 from app.worker.indexing_worker import run_indexing_job
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/repositories", tags=["Repositories"])
 
@@ -139,6 +147,68 @@ def list_repositories(
         .order_by(Repository.created_at.desc())
     )
     return list(db.scalars(stmt).all())
+
+
+# ---------------------------------------------------------------------------
+# Delete repository  (DELETE /repositories/{id})
+# ---------------------------------------------------------------------------
+
+@router.delete(
+    "/{repository_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a repository and all its associated data",
+)
+def delete_repository(
+    repository_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Permanently delete a repository and all cascaded data:
+    - CodeChunk rows (embeddings)
+    - RepositoryFile rows
+    - RepositoryFileSkip rows
+    - IndexingJob rows
+    - The local git clone directory
+
+    All DB cascades are handled by the ON DELETE CASCADE foreign keys defined
+    on each child table. The clone directory is removed after the DB commit.
+    """
+    owner_id = _get_user_id(current_user)
+    repo = _get_user_repository(db=db, repository_id=repository_id, owner_id=owner_id)
+
+    # Refuse to delete while an indexing job is actively running to avoid
+    # deleting rows that the background worker is currently writing.
+    active_job = db.scalars(
+        select(IndexingJob).where(
+            IndexingJob.repository_id == repository_id,
+            IndexingJob.status == "running",
+        )
+    ).first()
+    if active_job:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Cannot delete repository while an indexing job is running. "
+                "Wait for it to finish or fail before deleting."
+            ),
+        )
+
+    # Capture the clone path before deleting the row.
+    clone_path = Path(settings.clone_base_dir) / owner_id / repository_id
+
+    db.delete(repo)
+    db.commit()
+
+    # Remove the clone directory (best-effort — don't fail the request if the
+    # directory is already gone or inaccessible).
+    if clone_path.exists():
+        try:
+            shutil.rmtree(clone_path)
+            logger.info("Removed clone directory %s", clone_path)
+        except OSError as exc:
+            logger.warning("Could not remove clone directory %s: %s", clone_path, exc)
+
 
 
 # ---------------------------------------------------------------------------

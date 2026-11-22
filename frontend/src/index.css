@@ -8,7 +8,9 @@
   }
 }
 
-/* Thin scrollbar for sidebar */
+/* Thin scrollbar — neutral track, visible thumb */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { @apply bg-gray-600 rounded; }
+/* Use a mid-grey thumb that works on both light content areas and the dark sidebar */
+::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #64748b; }

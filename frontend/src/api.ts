@@ -1,23 +1,10 @@
 /**
  * api.ts – Centralised API client for RepoPilot AI
- *
- * Real backend routes (from app/main.py + app/api/):
- *   POST   /api/auth/register
- *   POST   /api/auth/login
- *   GET    /api/auth/me
- *   POST   /api/repositories          → RepositoryRegistrationResponse
- *   GET    /api/repositories          → RepositoryResponse[]
- *   GET    /api/repositories/:id/status → RepositoryStatusResponse
- *   GET    /api/repositories/:id/jobs/latest → IndexingJobResponse
- *   GET    /api/repositories/:id/jobs/:jobId → IndexingJobResponse
- *   GET    /api/repositories/:id/files  → RepositoryFileResponse[]
- *   GET    /api/repositories/:id/skips  → RepositoryFileSkipResponse[]
- *   POST   /api/retrieval/query        → RetrievalResponse
  */
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
-// ── Token store (in-memory; also persisted to localStorage) ─────────────────
+// ── Token store ──────────────────────────────────────────────────────────────
 let _token: string | null = localStorage.getItem("rp_token");
 
 export function setToken(t: string | null) {
@@ -36,25 +23,47 @@ function authHeaders(): Record<string, string> {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const url = `${BASE}${path}`;
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-      ...(init.headers as Record<string, string> | undefined),
-    },
-  });
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(),
+        ...(init.headers as Record<string, string> | undefined),
+      },
+    });
+  } catch (networkErr) {
+    throw new Error(
+      `NetworkError: ${networkErr instanceof Error ? networkErr.message : String(networkErr)}`
+    );
+  }
+
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try {
       const body = await res.json();
-      detail = body?.detail ?? JSON.stringify(body);
+      if (typeof body?.detail === "string") {
+        detail = `${res.status} ${body.detail}`;
+      } else if (Array.isArray(body?.detail)) {
+        detail =
+          `${res.status} ` +
+          body.detail
+            .map(
+              (e: { loc?: string[]; msg?: string }) =>
+                `${(e.loc ?? []).join(".")}: ${e.msg ?? "validation error"}`
+            )
+            .join("; ");
+      } else {
+        detail = `${res.status} ${JSON.stringify(body)}`;
+      }
     } catch {
-      /* ignore parse failure */
+      /* body was not JSON */
     }
     throw new Error(detail);
   }
-  // 204 / no-content
+
   const text = await res.text();
   return text ? (JSON.parse(text) as T) : (undefined as unknown as T);
 }
@@ -78,7 +87,11 @@ export async function login(email: string, password: string): Promise<TokenRespo
   });
 }
 
-export async function register(email: string, password: string, role = "developer"): Promise<UserResponse> {
+export async function register(
+  email: string,
+  password: string,
+  role = "developer"
+): Promise<UserResponse> {
   return request<UserResponse>("/api/auth/register", {
     method: "POST",
     body: JSON.stringify({ email, password, role }),
@@ -109,7 +122,9 @@ export interface RepositoryRegistrationResponse {
   message: string;
 }
 
-export async function registerRepository(url: string): Promise<RepositoryRegistrationResponse> {
+export async function registerRepository(
+  url: string
+): Promise<RepositoryRegistrationResponse> {
   return request<RepositoryRegistrationResponse>("/api/repositories", {
     method: "POST",
     body: JSON.stringify({ url }),
@@ -120,11 +135,15 @@ export async function listRepositories(): Promise<RepositoryResponse[]> {
   return request<RepositoryResponse[]>("/api/repositories");
 }
 
+export async function deleteRepository(repoId: string): Promise<void> {
+  return request<void>(`/api/repositories/${repoId}`, { method: "DELETE" });
+}
+
 // ── Indexing jobs ─────────────────────────────────────────────────────────────
 export interface IndexingJobResponse {
   id: string;
   repository_id: string;
-  status: string; // queued | running | completed | failed
+  status: string;
   attempt_count: number;
   started_at: string | null;
   finished_at: string | null;
@@ -140,12 +159,18 @@ export interface RepositoryStatusResponse {
   latest_job: IndexingJobResponse | null;
 }
 
-export async function getRepositoryStatus(repoId: string): Promise<RepositoryStatusResponse> {
+export async function getRepositoryStatus(
+  repoId: string
+): Promise<RepositoryStatusResponse> {
   return request<RepositoryStatusResponse>(`/api/repositories/${repoId}/status`);
 }
 
 export async function getLatestJob(repoId: string): Promise<IndexingJobResponse> {
   return request<IndexingJobResponse>(`/api/repositories/${repoId}/jobs/latest`);
+}
+
+export async function triggerReindex(repoId: string): Promise<{ indexing_job_id: string; job_id: string }> {
+  return request(`/api/repositories/${repoId}/jobs`, { method: "POST" });
 }
 
 export interface RepositoryFileSkipResponse {
@@ -155,7 +180,9 @@ export interface RepositoryFileSkipResponse {
   reason: string;
 }
 
-export async function getRepositorySkips(repoId: string): Promise<RepositoryFileSkipResponse[]> {
+export async function getRepositorySkips(
+  repoId: string
+): Promise<RepositoryFileSkipResponse[]> {
   return request<RepositoryFileSkipResponse[]>(`/api/repositories/${repoId}/skips`);
 }
 
@@ -187,7 +214,8 @@ export interface RetrievalResponse {
 export async function queryRetrieval(
   question: string,
   repositoryId?: string,
-  topK = 5
+  topK = 5,
+  similarityThreshold?: number
 ): Promise<RetrievalResponse> {
   return request<RetrievalResponse>("/api/retrieval/query", {
     method: "POST",
@@ -195,6 +223,40 @@ export async function queryRetrieval(
       question,
       repository_id: repositoryId ?? null,
       top_k: topK,
+      ...(similarityThreshold !== undefined
+        ? { similarity_threshold: similarityThreshold }
+        : {}),
+    }),
+  });
+}
+
+// ── Chat / LLM Q&A ────────────────────────────────────────────────────────────
+export interface ChatAskResponse {
+  question: string;
+  answer: string | null;
+  has_sufficient_evidence: boolean;
+  insufficient_evidence_reason: string | null;
+  best_score: number | null;
+  threshold: number;
+  chunks_used: number;
+  searched_repositories: string[];
+}
+
+export async function askQuestion(
+  question: string,
+  repositoryId?: string,
+  topK = 5,
+  similarityThreshold?: number
+): Promise<ChatAskResponse> {
+  return request<ChatAskResponse>("/api/chat/ask", {
+    method: "POST",
+    body: JSON.stringify({
+      question,
+      repository_id: repositoryId ?? null,
+      top_k: topK,
+      ...(similarityThreshold !== undefined
+        ? { similarity_threshold: similarityThreshold }
+        : {}),
     }),
   });
 }

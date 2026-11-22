@@ -158,6 +158,10 @@ def _load_sentence_transformer(model_name: str):
 def _model_dimension(model) -> int:
     """Return the embedding dimension reported by a loaded model."""
     try:
+        # get_embedding_dimension() is the current API (sentence-transformers ≥ 3.x).
+        # get_sentence_embedding_dimension() still works but emits a FutureWarning.
+        if hasattr(model, "get_embedding_dimension"):
+            return int(model.get_embedding_dimension())
         return int(model.get_sentence_embedding_dimension())
     except Exception as exc:
         raise EmbeddingModelLoadError(
