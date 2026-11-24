@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 .coverage
 development_notes.md
+design.md
 # Temporary cloned repositories
 clones/
 

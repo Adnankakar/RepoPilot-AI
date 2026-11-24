@@ -26,7 +26,7 @@ export default function RepoForm({ onIndexingStarted }: Props) {
     setLoading(true);
     try {
       const resp = await registerRepository(trimmed);
-      setSuccess(`Queued! Job ${resp.job_id}`);
+      setSuccess(`Queued for indexing — job ${resp.job_id}`);
       setUrl("");
       onIndexingStarted(resp.repository.id, resp.job_id);
     } catch (err: unknown) {
@@ -47,22 +47,22 @@ export default function RepoForm({ onIndexingStarted }: Props) {
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://github.com/owner/repository"
             required
-            className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-400 transition"
+            className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400 transition"
           />
         </div>
         <button
           type="submit"
           disabled={loading}
-          className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition disabled:opacity-60 whitespace-nowrap"
+          className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-60 whitespace-nowrap"
         >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-          {loading ? "Indexing…" : "Index Repo"}
+          {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+          {loading ? "Indexing" : "Index repo"}
         </button>
       </div>
 
       {success && (
-        <div className="flex items-start gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
-          <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-500" />
+        <div className="flex items-start gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+          <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" />
           {success}
         </div>
       )}

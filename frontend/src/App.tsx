@@ -16,24 +16,22 @@ import DashboardPage from "./pages/DashboardPage";
 import QAPage from "./pages/QAPage";
 import { Loader2 } from "lucide-react";
 
-// ── Full-page spinner (used while token is being verified on startup) ─────────
+// Full-page spinner shown while the stored token is being verified on startup.
 export function FullPageSpinner() {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-950 gap-3">
-      <div className="bg-blue-600 p-3 rounded-2xl mb-1">
-        <Loader2 className="w-6 h-6 text-white animate-spin" />
-      </div>
-      <p className="text-sm text-slate-500">Loading…</p>
+    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 gap-3">
+      <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
+      <p className="text-sm text-slate-400">Loading</p>
     </div>
   );
 }
 
-// ── Authenticated layout shell ────────────────────────────────────────────────
+// Authenticated layout shell.
 function AppShell() {
   return (
-    <div className="app-shell flex min-h-screen">
+    <div className="flex min-h-screen bg-slate-50">
       <Sidebar />
-      <main className="flex-1 min-h-screen overflow-y-auto bg-slate-50">
+      <main className="flex-1 min-h-screen overflow-y-auto">
         <Outlet />
       </main>
     </div>
@@ -50,20 +48,16 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// Landing and how-to-use are always public — no guard needed.
-// Auth page redirects logged-in users away.
+// Auth page redirects logged-in users away. While loading, render the auth
+// page itself rather than flashing a spinner first.
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  // While loading, show the auth page skeleton — do NOT show spinner here
-  // because the auth page has its own layout and showing a dark spinner first
-  // then swapping to it causes a flash. We just let it render; the submit
-  // handler won't be callable until the user types anyway.
   if (loading) return <>{children}</>;
   if (user) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
-// Root "/" — send to dashboard if logged in, landing if not.
+// Root "/" — dashboard if logged in, landing otherwise.
 function RootRedirect() {
   const { user, loading } = useAuth();
   if (loading) return <FullPageSpinner />;

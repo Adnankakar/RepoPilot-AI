@@ -2,67 +2,49 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Global reset ────────────────────────────────────────────────────────────*/
+/* ── Base ───────────────────────────────────────────────────────────────────*/
 @layer base {
   *, *::before, *::after { box-sizing: border-box; }
 
-  /* Public pages use dark background; app pages override via .app-shell */
-  html, body { @apply bg-gray-950 text-slate-100 antialiased; }
+  /* Light, neutral chrome across the whole application. */
+  html, body { @apply bg-slate-50 text-slate-900 antialiased; }
 }
 
 /* ── Scrollbar ───────────────────────────────────────────────────────────────*/
-::-webkit-scrollbar            { width: 5px; height: 5px; }
+::-webkit-scrollbar            { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track      { background: transparent; }
-::-webkit-scrollbar-thumb      { background: #334155; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover{ background: #475569; }
+::-webkit-scrollbar-thumb      { background: #cbd5e1; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover{ background: #94a3b8; }
 
-/* ── App shell overrides body bg for authenticated pages ─────────────────────*/
-.app-shell { background-color: #f8fafc; color: #0f172a; }
-.app-shell ::-webkit-scrollbar-thumb { background: #cbd5e1; }
-.app-shell ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+/* ── Code surface ────────────────────────────────────────────────────────────*/
+/* Used only on syntax-highlighted code — the one surface that earns a darker,
+   richer treatment because the code itself is the meaningful content. */
+.code-surface  { background: #1a1f2e; }
+.code-toolbar  { background: #1e2433; }
 
-/* ── Marquee ─────────────────────────────────────────────────────────────────*/
-@keyframes marquee-left  { from { transform: translateX(0);    } to { transform: translateX(-50%); } }
-@keyframes marquee-right { from { transform: translateX(-50%); } to { transform: translateX(0);    } }
-.marquee-left  { animation: marquee-left  38s linear infinite; }
-.marquee-right { animation: marquee-right 32s linear infinite; }
-.marquee-left:hover, .marquee-right:hover { animation-play-state: paused; }
-
-/* ── Gradient text ───────────────────────────────────────────────────────────*/
-.gradient-text {
-  background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #34d399 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+/* ── Indeterminate progress (communicates an in-flight indexing job) ─────────*/
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
 }
+.indeterminate { animation: indeterminate 1.4s ease-in-out infinite; }
 
-/* ── Glow button ─────────────────────────────────────────────────────────────*/
-.btn-glow { box-shadow: 0 0 24px rgba(59,130,246,.45); transition: box-shadow .2s, transform .15s; }
-.btn-glow:hover { box-shadow: 0 0 36px rgba(59,130,246,.65); transform: translateY(-1px); }
-
-/* ── Glass card ──────────────────────────────────────────────────────────────*/
-.glass {
-  background: rgba(15,23,42,.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255,255,255,.07);
-}
-
-/* ── Fade-up entrance animation ──────────────────────────────────────────────*/
-@keyframes fade-up { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
-.fade-up   { animation: fade-up .6s ease both; }
-.fade-up-1 { animation-delay: .1s; }
-.fade-up-2 { animation-delay: .22s; }
-.fade-up-3 { animation-delay: .34s; }
-.fade-up-4 { animation-delay: .46s; }
-
-/* ── Alert popup entrance animations ────────────────────────────────────────*/
+/* ── Alert popup (restrained) ────────────────────────────────────────────────*/
 @keyframes alert-pop-in {
-  from { opacity: 0; transform: scale(0.9) translateY(10px); }
-  60% { opacity: 1; }
-  to   { opacity: 1; transform: scale(1) translateY(0); }
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
-.alert-pop-in { animation: alert-pop-in .3s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.alert-pop-in { animation: alert-pop-in .18s ease-out both; }
 
 @keyframes alert-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
-.alert-backdrop-in { animation: alert-backdrop-in .22s ease both; }
+.alert-backdrop-in { animation: alert-backdrop-in .15s ease both; }
+
+/* ── Reduced motion ──────────────────────────────────────────────────────────*/
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

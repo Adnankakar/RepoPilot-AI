@@ -42,10 +42,10 @@ const SEVERITY: Record<
   Severity,
   { iconBg: string; ring: string; bar: string; DefaultIcon: React.ElementType; iconColor: string }
 > = {
-  error:   { iconBg: "bg-red-50",     ring: "ring-red-200",     bar: "from-red-500 to-rose-500",        DefaultIcon: AlertTriangle, iconColor: "text-red-600" },
-  warning: { iconBg: "bg-amber-50",   ring: "ring-amber-200",   bar: "from-amber-500 to-orange-500",   DefaultIcon: AlertTriangle, iconColor: "text-amber-600" },
-  info:    { iconBg: "bg-blue-50",    ring: "ring-blue-200",    bar: "from-blue-500 to-indigo-500",    DefaultIcon: Info,           iconColor: "text-blue-600" },
-  success: { iconBg: "bg-emerald-50", ring: "ring-emerald-200", bar: "from-emerald-500 to-teal-500",    DefaultIcon: AlertTriangle, iconColor: "text-emerald-600" },
+  error:   { iconBg: "bg-red-50",     ring: "ring-red-200",     bar: "bg-red-500",     DefaultIcon: AlertTriangle, iconColor: "text-red-600" },
+  warning: { iconBg: "bg-amber-50",   ring: "ring-amber-200",   bar: "bg-amber-500",   DefaultIcon: AlertTriangle, iconColor: "text-amber-600" },
+  info:    { iconBg: "bg-blue-50",    ring: "ring-blue-200",    bar: "bg-blue-600",    DefaultIcon: Info,           iconColor: "text-blue-600" },
+  success: { iconBg: "bg-emerald-50", ring: "ring-emerald-200", bar: "bg-emerald-500", DefaultIcon: AlertTriangle, iconColor: "text-emerald-600" },
 };
 
 // ── Provider ─────────────────────────────────────────────────────────────────
@@ -87,17 +87,17 @@ function AlertModal({ state, onClose }: { state: AlertState; onClose: () => void
 
   return (
     <div
-      className="alert-backdrop-in fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+      className="alert-backdrop-in fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="alert-title"
-        className="alert-pop-in relative w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden"
+        className="alert-pop-in relative w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200"
       >
-        {/* Top accent gradient bar */}
-        <div className={`h-1.5 w-full bg-gradient-to-r ${sev.bar}`} />
+        {/* Top accent bar */}
+        <div className={`h-1 w-full ${sev.bar}`} />
 
         {/* Close button */}
         <button
@@ -111,11 +111,11 @@ function AlertModal({ state, onClose }: { state: AlertState; onClose: () => void
         {/* Body */}
         <div className="px-7 pt-7 pb-2">
           <div className="flex items-start gap-4">
-            <div className={`shrink-0 p-3 rounded-2xl ring-1 ${sev.iconBg} ${sev.ring}`}>
+            <div className={`shrink-0 p-3 rounded-xl ring-1 ${sev.iconBg} ${sev.ring}`}>
               {state.icon ? state.icon : (Icon ? <Icon className={`w-6 h-6 ${sev.iconColor}`} /> : null)}
             </div>
             <div className="flex-1 min-w-0 pt-1">
-              <h3 id="alert-title" className="text-lg font-bold text-slate-900 tracking-tight">
+              <h3 id="alert-title" className="text-lg font-semibold text-slate-900 tracking-tight">
                 {state.title}
               </h3>
               {state.detail && (
@@ -131,7 +131,7 @@ function AlertModal({ state, onClose }: { state: AlertState; onClose: () => void
         <div className="flex justify-end px-7 pb-6 pt-4">
           <button
             onClick={onClose}
-            className="px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 active:scale-[0.98] rounded-xl transition shadow-sm"
+            className="px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition"
           >
             Got it
           </button>

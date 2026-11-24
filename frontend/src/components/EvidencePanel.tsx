@@ -26,7 +26,7 @@ SyntaxHighlighter.registerLanguage("yaml",       yaml);
 SyntaxHighlighter.registerLanguage("cpp",        cpp);
 SyntaxHighlighter.registerLanguage("java",       java);
 SyntaxHighlighter.registerLanguage("go",         go);
-SyntaxHighlighter.registerLanguage("rust",       rust);
+SyntaxHighlighter.registerLanguage("rust",      rust);
 
 // ── Language detection from file extension ───────────────────────────────────
 function detectLang(filePath: string): string {
@@ -47,12 +47,12 @@ function detectLang(filePath: string): string {
   return map[ext] ?? "python"; // default to python for unknown
 }
 
-// ── Score badge colours ───────────────────────────────────────────────────────
+// ── Score tiers (semantic, data-encoded) ─────────────────────────────────────
 function scoreBadge(s: number) {
-  if (s >= 0.8) return { badge: "bg-emerald-100 text-emerald-700 border border-emerald-200", bar: "bg-emerald-500", dot: "bg-emerald-500" };
-  if (s >= 0.6) return { badge: "bg-blue-100 text-blue-700 border border-blue-200",           bar: "bg-blue-500",   dot: "bg-blue-500"   };
-  if (s >= 0.4) return { badge: "bg-amber-100 text-amber-700 border border-amber-200",        bar: "bg-amber-400",  dot: "bg-amber-400"  };
-  return               { badge: "bg-slate-100 text-slate-600 border border-slate-200",        bar: "bg-slate-400",  dot: "bg-slate-400"  };
+  if (s >= 0.8) return { badge: "bg-emerald-50 text-emerald-700 border border-emerald-200", bar: "bg-emerald-500", dot: "bg-emerald-500" };
+  if (s >= 0.6) return { badge: "bg-blue-50 text-blue-700 border border-blue-200",           bar: "bg-blue-500",   dot: "bg-blue-500"   };
+  if (s >= 0.4) return { badge: "bg-amber-50 text-amber-700 border border-amber-200",        bar: "bg-amber-400",  dot: "bg-amber-400"  };
+  return               { badge: "bg-slate-100 text-slate-600 border border-slate-200",       bar: "bg-slate-400",  dot: "bg-slate-400"  };
 }
 
 // ── Copy button ───────────────────────────────────────────────────────────────
@@ -66,11 +66,19 @@ function CopyBtn({ text }: { text: string }) {
           setTimeout(() => setCopied(false), 1800);
         });
       }}
-      className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors px-2.5 py-1 rounded-lg hover:bg-white/10"
+      className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors px-2.5 py-1 rounded-md hover:bg-white/10"
     >
-      {copied
-        ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400">Copied</span></>
-        : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+      {copied ? (
+        <>
+          <Check className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="text-emerald-400">Copied</span>
+        </>
+      ) : (
+        <>
+          <Copy className="w-3.5 h-3.5" />
+          <span>Copy</span>
+        </>
+      )}
     </button>
   );
 }
@@ -94,18 +102,19 @@ export default function EvidencePanel({ chunks }: Props) {
         return (
           <div
             key={chunk.id}
-            className="rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-white transition-shadow hover:shadow-md"
+            className="rounded-xl overflow-hidden border border-slate-200 bg-white"
           >
             {/* ── Accordion header ──────────────────────────────────────── */}
             <button
               onClick={() => setOpenIdx(open ? null : idx)}
+              aria-expanded={open}
               className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
             >
               {/* Score dot */}
               <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
 
               {/* File icon + path */}
-              <FileCode className="w-4 h-4 text-blue-500 shrink-0" />
+              <FileCode className="w-4 h-4 text-slate-400 shrink-0" />
               <span className="flex-1 min-w-0">
                 <span className="text-sm font-semibold text-slate-800 truncate block">{fileName}</span>
                 <span className="text-xs text-slate-400 font-mono truncate block">
@@ -114,7 +123,7 @@ export default function EvidencePanel({ chunks }: Props) {
               </span>
 
               {/* Line range */}
-              <span className="hidden sm:flex items-center gap-1 text-xs text-slate-400 shrink-0 font-mono bg-slate-100 px-2 py-0.5 rounded-lg">
+              <span className="hidden sm:flex items-center gap-1 text-xs text-slate-500 shrink-0 font-mono bg-slate-100 px-2 py-0.5 rounded-md">
                 <Hash className="w-3 h-3" />{chunk.start_line}–{chunk.end_line}
               </span>
 
@@ -123,7 +132,7 @@ export default function EvidencePanel({ chunks }: Props) {
                 <div className="w-16 h-1.5 rounded-full bg-slate-100 overflow-hidden">
                   <div className={`h-full rounded-full ${bar} transition-all`} style={{ width: `${pct}%` }} />
                 </div>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${badge}`}>{pct}%</span>
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-md whitespace-nowrap tabular-nums ${badge}`}>{pct}%</span>
               </div>
 
               {open
@@ -136,8 +145,7 @@ export default function EvidencePanel({ chunks }: Props) {
               <div className="border-t border-slate-200">
                 {/* Code toolbar — dark strip */}
                 <div
-                  className="flex items-center justify-between px-4 py-2"
-                  style={{ background: "#1e2433" }}
+                  className="flex items-center justify-between px-4 py-2 code-toolbar"
                 >
                   <div className="flex items-center gap-3">
                     {/* macOS dots */}
@@ -155,7 +163,7 @@ export default function EvidencePanel({ chunks }: Props) {
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-500 font-mono">
+                    <span className="text-xs text-slate-500 font-mono tabular-nums">
                       lines {chunk.start_line}–{chunk.end_line}
                       {chunk.commit_sha && ` · ${chunk.commit_sha.slice(0, 7)}`}
                     </span>
@@ -164,7 +172,7 @@ export default function EvidencePanel({ chunks }: Props) {
                 </div>
 
                 {/* Syntax-highlighted code */}
-                <div className="overflow-x-auto" style={{ background: "#1a1f2e" }}>
+                <div className="overflow-x-auto code-surface">
                   <SyntaxHighlighter
                     language={lang}
                     style={atomOneDark}

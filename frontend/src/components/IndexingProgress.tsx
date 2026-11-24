@@ -15,9 +15,9 @@ const POLL_MS  = 2500;
 const TERMINAL = new Set(["completed", "failed", "error"]);
 
 function JobIcon({ s }: { s: string }) {
-  if (s === "completed") return <CheckCircle2 className="w-5 h-5 text-emerald-500" />;
+  if (s === "completed") return <CheckCircle2 className="w-5 h-5 text-emerald-600" />;
   if (s === "failed" || s === "error") return <XCircle className="w-5 h-5 text-red-500" />;
-  if (s === "running") return <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />;
+  if (s === "running") return <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />;
   return <Clock className="w-5 h-5 text-slate-400" />;
 }
 
@@ -58,19 +58,19 @@ export default function IndexingProgress({ repoId, jobId, onDone }: Props) {
   useEffect(() => {
     poll();
     timer.current = setInterval(poll, POLL_MS);
-    return () => clearInterval(timer.current!);
+    return () => clearInterval(timer.current);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoId, jobId]);
 
   if (pollFailed) return (
-    <div className="flex items-center gap-2 text-sm text-slate-500 bg-white border border-slate-200 rounded-2xl px-4 py-3">
+    <div className="flex items-center gap-2 text-sm text-slate-500 bg-white border border-slate-200 rounded-xl px-4 py-3">
       <AlertTriangle className="w-4 h-4 shrink-0 text-slate-400" /> Status unavailable — see the alert for details.
     </div>
   );
 
   if (!status) return (
-    <div className="flex items-center gap-2 text-sm text-slate-500 bg-white border border-slate-200 rounded-2xl px-4 py-3">
-      <Loader2 className="w-4 h-4 animate-spin text-blue-500" /> Loading job status…
+    <div className="flex items-center gap-2 text-sm text-slate-500 bg-white border border-slate-200 rounded-xl px-4 py-3">
+      <Loader2 className="w-4 h-4 animate-spin text-blue-600" /> Loading job status
     </div>
   );
 
@@ -79,7 +79,7 @@ export default function IndexingProgress({ repoId, jobId, onDone }: Props) {
   const done      = TERMINAL.has(jobStatus);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
         <div className="flex items-center gap-3">
@@ -89,21 +89,23 @@ export default function IndexingProgress({ repoId, jobId, onDone }: Props) {
               Indexing{" "}
               <span className={`${statusColor(jobStatus)} capitalize`}>{jobStatus}</span>
             </p>
-            <p className="text-xs text-slate-400 font-mono mt-0.5">Job {jobId.slice(0,8)}…</p>
+            <p className="text-xs text-slate-400 font-mono mt-0.5">Job {jobId.slice(0, 8)}</p>
           </div>
         </div>
         {!done && (
-          <span className="text-xs text-blue-600 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-full">
+          <span className="text-xs text-blue-700 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-md">
             Polling every {POLL_MS / 1000}s
           </span>
         )}
       </div>
 
       {/* Progress bar */}
-      <div className="h-1 w-full bg-slate-100">
-        {!done && <div className="h-full bg-blue-500 animate-pulse w-full" />}
-        {jobStatus === "completed" && <div className="h-full bg-emerald-400 w-full" />}
-        {(jobStatus === "failed" || jobStatus === "error") && <div className="h-full bg-red-400 w-full" />}
+      <div className="h-1 w-full bg-slate-100 overflow-hidden">
+        {!done && (
+          <div className="h-full w-1/3 bg-blue-500 rounded-full indeterminate" />
+        )}
+        {jobStatus === "completed" && <div className="h-full bg-emerald-500 w-full" />}
+        {(jobStatus === "failed" || jobStatus === "error") && <div className="h-full bg-red-500 w-full" />}
       </div>
 
       {/* Body */}
@@ -115,15 +117,15 @@ export default function IndexingProgress({ repoId, jobId, onDone }: Props) {
             job?.finished_at ? ["Finished", new Date(job.finished_at).toLocaleTimeString()] : null,
             job?.attempt_count !== undefined ? ["Attempts", String(job.attempt_count)] : null,
           ].filter(Boolean).map(([k, v]) => (
-            <div key={k} className="bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
+            <div key={k} className="bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
               <p className="text-slate-400 mb-0.5">{k}</p>
-              <p className="font-semibold text-slate-700 capitalize">{v}</p>
+              <p className="font-medium text-slate-700 capitalize tabular-nums">{v}</p>
             </div>
           ))}
         </div>
 
         {job?.error_summary && (
-          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
             <p className="text-xs font-semibold text-red-700 mb-1">
               Error{job.failed_stage ? ` in ${job.failed_stage}` : ""}
             </p>
@@ -132,9 +134,10 @@ export default function IndexingProgress({ repoId, jobId, onDone }: Props) {
         )}
 
         {skips.length > 0 && (
-          <div className="border border-amber-200 rounded-xl overflow-hidden">
+          <div className="border border-amber-200 rounded-lg overflow-hidden">
             <button
               onClick={() => setShowSkips(p => !p)}
+              aria-expanded={showSkips}
               className="flex items-center justify-between w-full px-4 py-2.5 bg-amber-50 text-left"
             >
               <span className="text-xs font-semibold text-amber-800">
