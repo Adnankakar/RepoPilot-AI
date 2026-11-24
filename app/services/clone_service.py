@@ -7,7 +7,9 @@ namespaced by owner_id and repository ID to avoid collisions.
 """
 
 import logging
+import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -22,6 +24,21 @@ class CloneError(Exception):
 
 class GitNotAvailable(Exception):
     """Raised when git is not installed or not on PATH."""
+
+
+def _remove_readonly(_func, path, _exc_info):
+    """Error handler for shutil.rmtree that clears the read-only bit on
+    Windows (git pack files are often read-only) and retries the removal."""
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        _func(path)
+    except Exception:
+        pass
+
+
+def _safe_rmtree(dest: Path) -> None:
+    """Remove a directory tree, tolerating read-only files (Windows)."""
+    shutil.rmtree(dest, onerror=_remove_readonly)
 
 
 def _require_git() -> str:
@@ -80,14 +97,21 @@ def clone_repository(
     # Remove stale clone so we always start clean.
     if dest.exists():
         logger.info("Removing existing clone at %s", dest)
-        shutil.rmtree(dest)
+        _safe_rmtree(dest)
 
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     logger.info("Cloning %s (branch=%s) → %s", clone_url, branch, dest)
 
+    # core.longpaths=true is required on Windows. Our clone destination is
+    # already deep (clones/<owner_uuid>/<repo_uuid>/...) which leaves little
+    # of the 260-char Windows MAX_PATH budget for the repository's own file
+    # paths. Without this flag git fetches objects but fails the checkout
+    # with "Clone succeeded, but checkout failed." on any file path over
+    # the limit. The flag is harmless on Linux/macOS.
     cmd = [
         git,
+        "-c", "core.longpaths=true",
         "clone",
         "--branch", branch,
         "--single-branch",

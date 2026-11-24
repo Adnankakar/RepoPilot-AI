@@ -1,123 +1,112 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
-  listRepositories,
-  deleteRepository,
-  triggerReindex,
-  RepositoryResponse,
+  listRepositories, deleteRepository, triggerReindex, RepositoryResponse,
 } from "../api";
 import RepoForm from "../components/RepoForm";
 import IndexingProgress from "../components/IndexingProgress";
+import { useError } from "../context/ErrorContext";
 import {
-  GitBranch,
-  Database,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  RefreshCw,
-  Trash2,
-  RotateCcw,
-  Loader2,
-  AlertTriangle,
-  ExternalLink,
+  GitBranch, LayoutGrid, CheckCircle2, Clock, XCircle,
+  RefreshCw, Trash2, RotateCcw, Loader2, AlertTriangle, ExternalLink,
+  Plus, ChevronRight,
 } from "lucide-react";
 
-// ─── Status helpers ───────────────────────────────────────────────────────────
+// ── Shared design tokens ──────────────────────────────────────────────────────
+const PAGE   = "min-h-screen bg-slate-50";
+const INNER  = "max-w-5xl mx-auto px-6 py-8 space-y-8";
+const CARD   = "bg-white rounded-2xl border border-slate-200 shadow-sm";
+const SECT_TITLE = "text-xs font-bold text-slate-500 uppercase tracking-widest";
 
-const STATUS_STYLES: Record<string, { pill: string; label: string }> = {
-  pending:  { pill: "bg-gray-100 text-gray-500 border border-gray-200",   label: "Pending" },
-  indexing: { pill: "bg-blue-100 text-blue-700 border border-blue-200",   label: "Indexing" },
-  indexed:  { pill: "bg-emerald-100 text-emerald-700 border border-emerald-200", label: "Indexed" },
-  failed:   { pill: "bg-red-100 text-red-600 border border-red-200",      label: "Failed" },
-  error:    { pill: "bg-red-100 text-red-600 border border-red-200",      label: "Error" },
-  queued:   { pill: "bg-amber-100 text-amber-700 border border-amber-200", label: "Queued" },
+// ── Status config ─────────────────────────────────────────────────────────────
+const STATUS_CFG: Record<string, { label: string; pill: string; ring: string }> = {
+  pending:  { label: "Pending",  pill: "bg-slate-100 text-slate-500",     ring: "ring-slate-200"  },
+  queued:   { label: "Queued",   pill: "bg-amber-100 text-amber-700",     ring: "ring-amber-200"  },
+  indexing: { label: "Indexing", pill: "bg-blue-100  text-blue-700",      ring: "ring-blue-200"   },
+  indexed:  { label: "Indexed",  pill: "bg-emerald-100 text-emerald-700", ring: "ring-emerald-200"},
+  failed:   { label: "Failed",   pill: "bg-red-100   text-red-600",       ring: "ring-red-200"    },
+  error:    { label: "Error",    pill: "bg-red-100   text-red-600",       ring: "ring-red-200"    },
 };
 
 function StatusPill({ status }: { status: string }) {
-  const s = STATUS_STYLES[status] ?? { pill: "bg-gray-100 text-gray-500 border border-gray-200", label: status };
+  const cfg = STATUS_CFG[status] ?? { label: status, pill: "bg-slate-100 text-slate-500", ring: "" };
   return (
-    <span className={`inline-flex items-center text-xs font-medium px-2.5 py-0.5 rounded-full capitalize ${s.pill}`}>
-      {s.label}
+    <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full capitalize ring-1 ${cfg.pill} ${cfg.ring}`}>
+      {cfg.label}
     </span>
   );
 }
 
-function StatusIcon({ status }: { status: string }) {
-  if (status === "indexed")
-    return <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />;
-  if (status === "failed" || status === "error")
-    return <XCircle className="w-4 h-4 text-red-500 shrink-0" />;
-  if (status === "indexing" || status === "pending" || status === "queued")
-    return <Clock className="w-4 h-4 text-blue-400 shrink-0" />;
-  return <GitBranch className="w-4 h-4 text-gray-400 shrink-0" />;
+function StatusDot({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    indexed: "bg-emerald-500", indexing: "bg-blue-500 animate-pulse",
+    queued: "bg-amber-400 animate-pulse", pending: "bg-slate-300",
+    failed: "bg-red-500", error: "bg-red-500",
+  };
+  return <span className={`w-2 h-2 rounded-full shrink-0 ${colors[status] ?? "bg-slate-300"}`} />;
 }
 
-// ─── Delete confirmation modal ────────────────────────────────────────────────
-
-interface DeleteModalProps {
-  repo: RepositoryResponse;
-  onConfirm: () => void;
-  onCancel: () => void;
-  deleting: boolean;
-}
-
-function DeleteModal({ repo, onConfirm, onCancel, deleting }: DeleteModalProps) {
-  // Close on Escape
+// ── Delete confirmation modal ─────────────────────────────────────────────────
+function DeleteModal({ repo, onConfirm, onCancel, busy }: {
+  repo: RepositoryResponse; onConfirm: () => void; onCancel: () => void; busy: boolean;
+}) {
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
   }, [onCancel]);
+
+  const short = repo.url.replace("https://github.com/", "");
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm"
+      onClick={e => { if (e.target === e.currentTarget) onCancel(); }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-        <div className="flex items-center gap-3 px-6 py-5 border-b border-gray-100">
-          <div className="bg-red-100 p-2 rounded-lg">
+      <div className={`${CARD} w-full max-w-md mx-4 shadow-2xl overflow-hidden`}>
+        {/* Header */}
+        <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-100">
+          <div className="bg-red-100 p-2.5 rounded-xl ring-1 ring-red-200">
             <Trash2 className="w-5 h-5 text-red-600" />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-gray-900">Delete repository?</h3>
-            <p className="text-xs text-gray-400 mt-0.5">This cannot be undone</p>
+            <h3 className="text-base font-bold text-slate-900">Delete repository?</h3>
+            <p className="text-xs text-slate-400 mt-0.5">This action cannot be undone</p>
           </div>
         </div>
 
+        {/* Body */}
         <div className="px-6 py-5 space-y-3">
-          <p className="text-sm text-gray-600">
-            All indexed chunks, embeddings, and job history for{" "}
-            <span className="font-mono text-gray-800 bg-gray-100 px-1.5 py-0.5 rounded text-xs">
-              {repo.url.replace("https://github.com/", "")}
-            </span>{" "}
-            will be permanently deleted along with the local clone.
+          <p className="text-sm text-slate-600 leading-relaxed">
+            All chunks, embeddings, and job history for{" "}
+            <code className="text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded-lg text-xs font-mono">{short}</code>{" "}
+            will be permanently removed along with the local clone.
           </p>
-          {(repo.status === "indexing" || repo.status === "queued") && (
-            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+          {["indexing", "queued"].includes(repo.status) && (
+            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 ring-1 ring-amber-100 rounded-xl px-4 py-3">
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-700">
-                An indexing job is currently <strong>{repo.status}</strong>. You may need to wait for
-                it to finish before deletion is allowed.
+              <p className="text-xs text-amber-700 leading-relaxed">
+                An indexing job is currently <strong>{repo.status}</strong>. The server will reject the delete — wait for it to finish first.
               </p>
             </div>
           )}
         </div>
 
-        <div className="flex justify-end gap-3 px-6 py-4 bg-gray-50 border-t border-gray-100">
+        {/* Footer */}
+        <div className="flex justify-end gap-3 px-6 py-4 bg-slate-50 border-t border-slate-100">
           <button
             onClick={onCancel}
-            disabled={deleting}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition disabled:opacity-50"
+            disabled={busy}
+            className="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-100 transition disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
-            disabled={deleting}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition disabled:opacity-60"
+            disabled={busy}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-xl transition disabled:opacity-60"
           >
-            {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-            {deleting ? "Deleting…" : "Delete permanently"}
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+            {busy ? "Deleting…" : "Delete permanently"}
           </button>
         </div>
       </div>
@@ -125,275 +114,301 @@ function DeleteModal({ repo, onConfirm, onCancel, deleting }: DeleteModalProps) 
   );
 }
 
-// ─── Repo card ────────────────────────────────────────────────────────────────
-
-interface RepoCardProps {
+// ── Repo card ─────────────────────────────────────────────────────────────────
+function RepoCard({ repo, onDelete, onReindex, reindexingId }: {
   repo: RepositoryResponse;
-  onDelete: (repo: RepositoryResponse) => void;
-  onReindex: (repo: RepositoryResponse) => void;
+  onDelete: (r: RepositoryResponse) => void;
+  onReindex: (r: RepositoryResponse) => void;
   reindexingId: string | null;
-}
-
-function RepoCard({ repo, onDelete, onReindex, reindexingId }: RepoCardProps) {
-  const isReindexing = reindexingId === repo.id;
-  const canReindex = repo.status === "indexed" || repo.status === "failed" || repo.status === "error";
-  const shortName = repo.url.replace(/^https?:\/\/(www\.)?github\.com\//, "");
+}) {
+  const isRI  = reindexingId === repo.id;
+  const canRI = ["indexed", "failed", "error"].includes(repo.status);
+  const shortUrl = repo.url.replace(/^https?:\/\/(www\.)?github\.com\//, "");
+  const owner = shortUrl.split("/")[0];
+  const name  = shortUrl.split("/").slice(1).join("/");
 
   return (
-    <div className="group flex items-center gap-4 bg-white border border-gray-200 hover:border-gray-300 rounded-xl px-5 py-4 shadow-sm transition">
-      <StatusIcon status={repo.status} />
+    <div className="group flex items-center gap-4 bg-white border border-slate-200 hover:border-blue-200 hover:shadow-md rounded-2xl px-5 py-4 transition-all duration-150">
+      <StatusDot status={repo.status} />
 
+      {/* Repo info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 min-w-0">
-          <p className="text-sm font-semibold text-gray-800 truncate">{shortName}</p>
+          <span className="text-xs text-slate-400 font-mono shrink-0">{owner}/</span>
+          <span className="text-sm font-bold text-slate-900 truncate">{name}</span>
           <a
             href={repo.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="shrink-0 text-gray-300 hover:text-blue-500 transition opacity-0 group-hover:opacity-100"
             title="Open on GitHub"
+            className="shrink-0 text-slate-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition"
           >
             <ExternalLink className="w-3.5 h-3.5" />
           </a>
         </div>
-        <p className="text-xs text-gray-400 mt-0.5 truncate">
-          {repo.provider} · <span className="font-mono">{repo.default_branch}</span>
+        <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 font-mono">
+          <span className="capitalize">{repo.provider}</span>
+          <span className="text-slate-200">·</span>
+          <span>{repo.default_branch}</span>
           {repo.indexed_commit && (
-            <> · <span className="font-mono">{repo.indexed_commit.slice(0, 7)}</span></>
+            <><span className="text-slate-200">·</span><span>{repo.indexed_commit.slice(0, 7)}</span></>
           )}
-          <span className="ml-2">{new Date(repo.created_at).toLocaleDateString()}</span>
-        </p>
+          <span className="text-slate-200">·</span>
+          <span>{new Date(repo.created_at).toLocaleDateString()}</span>
+        </div>
       </div>
 
+      {/* Actions */}
       <div className="flex items-center gap-2 shrink-0">
         <StatusPill status={repo.status} />
 
-        {canReindex && (
+        {canRI && (
           <button
             onClick={() => onReindex(repo)}
-            disabled={isReindexing}
-            title="Re-index this repository"
-            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition disabled:opacity-40 opacity-0 group-hover:opacity-100"
+            disabled={isRI}
+            title="Re-index repository"
+            className="p-2 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition opacity-0 group-hover:opacity-100 disabled:opacity-40"
           >
-            {isReindexing
-              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              : <RotateCcw className="w-3.5 h-3.5" />}
+            {isRI
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : <RotateCcw className="w-4 h-4" />}
           </button>
         )}
 
         <button
           onClick={() => onDelete(repo)}
           title="Delete repository"
-          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition opacity-0 group-hover:opacity-100"
+          className="p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 transition opacity-0 group-hover:opacity-100"
         >
-          <Trash2 className="w-3.5 h-3.5" />
+          <Trash2 className="w-4 h-4" />
         </button>
       </div>
     </div>
   );
 }
 
-// ─── Active job tracker ───────────────────────────────────────────────────────
+// ── Stats card ────────────────────────────────────────────────────────────────
+function StatCard({ label, value, icon: Icon, colorCls, bgCls }: {
+  label: string; value: number;
+  icon: React.ElementType; colorCls: string; bgCls: string;
+}) {
+  return (
+    <div className={`${CARD} px-5 py-4`}>
+      <div className="flex items-center justify-between mb-3">
+        <p className={`${SECT_TITLE}`}>{label}</p>
+        <div className={`p-2 rounded-xl ${bgCls}`}>
+          <Icon className={`w-4 h-4 ${colorCls}`} />
+        </div>
+      </div>
+      <p className="text-3xl font-black text-slate-900 tracking-tight">{value}</p>
+    </div>
+  );
+}
 
+// ── Page ──────────────────────────────────────────────────────────────────────
 interface ActiveJob { repoId: string; jobId: string }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
 export default function DashboardPage() {
-  const [repos, setRepos]           = useState<RepositoryResponse[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [activeJob, setActiveJob]   = useState<ActiveJob | null>(null);
+  const [repos,        setRepos]        = useState<RepositoryResponse[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [activeJob,    setActiveJob]    = useState<ActiveJob | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<RepositoryResponse | null>(null);
-  const [deleting, setDeleting]     = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting,     setDeleting]     = useState(false);
   const [reindexingId, setReindexingId] = useState<string | null>(null);
-  const [reindexError, setReindexError] = useState<string | null>(null);
+  const [showForm,     setShowForm]     = useState(false);
+  const { showError } = useError();
 
   const fetchRepos = useCallback(async () => {
     setLoading(true);
-    try {
-      setRepos(await listRepositories());
-    } catch {
-      /* non-fatal */
-    } finally {
-      setLoading(false);
-    }
+    try { setRepos(await listRepositories()); } catch { /* ok */ }
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchRepos(); }, [fetchRepos]);
 
   const handleIndexingStarted = (repoId: string, jobId: string) => {
     setActiveJob({ repoId, jobId });
+    setShowForm(false);
     fetchRepos();
   };
+  const handleJobDone = () => { fetchRepos(); setTimeout(() => setActiveJob(null), 3000); };
 
-  const handleJobDone = () => {
-    fetchRepos();
-    setTimeout(() => setActiveJob(null), 3000);
-  };
-
-  // ── Delete flow ────────────────────────────────────────────────────────────
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
-    setDeleteError(null);
     try {
       await deleteRepository(deleteTarget.id);
-      setDeleteTarget(null);
-      // If the deleted repo was being tracked as an active job, clear it
       if (activeJob?.repoId === deleteTarget.id) setActiveJob(null);
+      setDeleteTarget(null);
       await fetchRepos();
-    } catch (err: unknown) {
-      setDeleteError(err instanceof Error ? err.message : "Delete failed.");
-    } finally {
-      setDeleting(false);
-    }
+    } catch (e: unknown) {
+      showError("Delete failed", e instanceof Error ? e.message.replace(/^\d{3}\s?/, "") : "Could not delete repository.");
+    } finally { setDeleting(false); }
   };
 
-  // ── Re-index flow ──────────────────────────────────────────────────────────
   const handleReindex = async (repo: RepositoryResponse) => {
-    setReindexError(null);
     setReindexingId(repo.id);
     try {
-      const result = await triggerReindex(repo.id);
-      setActiveJob({ repoId: repo.id, jobId: result.job_id });
+      const r = await triggerReindex(repo.id);
+      setActiveJob({ repoId: repo.id, jobId: r.job_id });
       await fetchRepos();
-    } catch (err: unknown) {
-      setReindexError(err instanceof Error ? err.message : "Re-index failed.");
-    } finally {
-      setReindexingId(null);
-    }
+    } catch (e: unknown) {
+      showError("Re-index failed", e instanceof Error ? e.message.replace(/^\d{3}\s?/, "") : "Could not trigger re-indexing.");
+    } finally { setReindexingId(null); }
   };
 
-  // ── Stats ──────────────────────────────────────────────────────────────────
-  const indexed = repos.filter((r) => r.status === "indexed").length;
-  const failed  = repos.filter((r) => r.status === "failed" || r.status === "error").length;
-  const active  = repos.filter((r) => r.status === "indexing" || r.status === "queued" || r.status === "pending").length;
+  const indexed = repos.filter(r => r.status === "indexed").length;
+  const failed  = repos.filter(r => ["failed", "error"].includes(r.status)).length;
+  const active  = repos.filter(r => ["indexing", "queued", "pending"].includes(r.status)).length;
 
   return (
-    <div className="p-8 max-w-4xl mx-auto space-y-8">
+    <div className={PAGE}>
+      <div className={INNER}>
 
-      {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2.5">
-          <Database className="w-6 h-6 text-blue-600" />
-          Dashboard
-        </h1>
-        <p className="text-gray-500 text-sm mt-1">
-          Index GitHub repositories and monitor their status.
-        </p>
-      </div>
-
-      {/* ── Stats ──────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {[
-          { label: "Total",    value: repos.length, icon: GitBranch,   color: "text-blue-500",    bg: "bg-blue-50" },
-          { label: "Indexed",  value: indexed,       icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50" },
-          { label: "Active",   value: active,        icon: Clock,       color: "text-amber-500",   bg: "bg-amber-50" },
-          { label: "Failed",   value: failed,        icon: XCircle,     color: "text-red-500",     bg: "bg-red-50" },
-        ].map(({ label, value, icon: Icon, color, bg }) => (
-          <div key={label} className="bg-white border border-gray-200 rounded-xl px-5 py-4 shadow-sm">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-medium text-gray-500">{label}</p>
-              <div className={`${bg} p-1.5 rounded-lg`}>
-                <Icon className={`w-4 h-4 ${color}`} />
+        {/* ── Page header ───────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2.5 tracking-tight">
+              <div className="bg-blue-600 p-2 rounded-xl">
+                <LayoutGrid className="w-5 h-5 text-white" />
               </div>
+              Dashboard
+            </h1>
+            <p className="text-slate-500 text-sm mt-1.5 ml-0.5">
+              Index GitHub repositories and ask questions about your code.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchRepos}
+              disabled={loading}
+              title="Refresh"
+              className="p-2.5 rounded-xl border border-slate-200 bg-white text-slate-400 hover:text-blue-600 hover:border-blue-200 transition disabled:opacity-40 shadow-sm"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
+            <button
+              onClick={() => setShowForm(v => !v)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition shadow-sm shadow-blue-200"
+            >
+              <Plus className="w-4 h-4" />
+              Add Repository
+            </button>
+          </div>
+        </div>
+
+        {/* ── Stats grid ────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <StatCard label="Total"   value={repos.length} icon={GitBranch}    colorCls="text-blue-600"    bgCls="bg-blue-50 ring-1 ring-blue-100"    />
+          <StatCard label="Indexed" value={indexed}       icon={CheckCircle2} colorCls="text-emerald-600" bgCls="bg-emerald-50 ring-1 ring-emerald-100"/>
+          <StatCard label="Active"  value={active}        icon={Clock}        colorCls="text-amber-600"   bgCls="bg-amber-50 ring-1 ring-amber-100"   />
+          <StatCard label="Failed"  value={failed}        icon={XCircle}      colorCls="text-red-600"     bgCls="bg-red-50 ring-1 ring-red-100"       />
+        </div>
+
+        {/* ── Add repo form (slide in/out) ───────────────────────────────── */}
+        {showForm && (
+          <div className={`${CARD} p-6`}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-bold text-slate-900">Index a Repository</h2>
+              <button
+                onClick={() => setShowForm(false)}
+                className="text-slate-400 hover:text-slate-600 transition text-xs"
+              >
+                ✕ Close
+              </button>
             </div>
-            <p className="text-3xl font-bold text-gray-900">{value}</p>
+            <RepoForm onIndexingStarted={handleIndexingStarted} />
           </div>
-        ))}
-      </div>
+        )}
 
-      {/* ── Add repository ──────────────────────────────────────────────── */}
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-4">
-        <h2 className="text-base font-semibold text-gray-800">Index a Repository</h2>
-        <RepoForm onIndexingStarted={handleIndexingStarted} />
-      </div>
-
-      {/* ── Re-index error ──────────────────────────────────────────────── */}
-      {reindexError && (
-        <div className="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
-          <XCircle className="w-4 h-4 shrink-0 mt-0.5" />
+        {/* ── Active indexing job ────────────────────────────────────────── */}
+        {activeJob && (
           <div>
-            <span className="font-semibold">Re-index failed: </span>{reindexError}
+            <p className={`${SECT_TITLE} mb-3`}>Active Indexing Job</p>
+            <IndexingProgress repoId={activeJob.repoId} jobId={activeJob.jobId} onDone={handleJobDone} />
           </div>
-          <button onClick={() => setReindexError(null)} className="ml-auto text-red-400 hover:text-red-600">✕</button>
-        </div>
-      )}
+        )}
 
-      {/* ── Delete error ────────────────────────────────────────────────── */}
-      {deleteError && (
-        <div className="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
-          <XCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <div>
-            <span className="font-semibold">Delete failed: </span>{deleteError}
-          </div>
-          <button onClick={() => setDeleteError(null)} className="ml-auto text-red-400 hover:text-red-600">✕</button>
-        </div>
-      )}
-
-      {/* ── Active job progress ─────────────────────────────────────────── */}
-      {activeJob && (
+        {/* ── Repository list ────────────────────────────────────────────── */}
         <div>
-          <h2 className="text-sm font-semibold text-gray-700 mb-3">Active Indexing Job</h2>
-          <IndexingProgress
-            repoId={activeJob.repoId}
-            jobId={activeJob.jobId}
-            onDone={handleJobDone}
-          />
-        </div>
-      )}
+          <div className="flex items-center justify-between mb-4">
+            <p className={SECT_TITLE}>
+              Repositories{repos.length > 0 ? ` · ${repos.length}` : ""}
+            </p>
+            {repos.length > 0 && !showForm && (
+              <button
+                onClick={() => setShowForm(true)}
+                className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-semibold transition"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add new
+              </button>
+            )}
+          </div>
 
-      {/* ── Repository list ──────────────────────────────────────────────── */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-gray-700">
-            Repositories{repos.length > 0 ? ` (${repos.length})` : ""}
-          </h2>
-          <button
-            onClick={fetchRepos}
-            disabled={loading}
-            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-blue-600 transition disabled:opacity-40"
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="bg-slate-100 rounded-2xl h-[72px] animate-pulse" />
+              ))}
+            </div>
+          ) : repos.length === 0 ? (
+            <div
+              className={`${CARD} text-center py-16 border-2 border-dashed border-slate-200 shadow-none`}
+            >
+              <div className="bg-slate-100 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <GitBranch className="w-7 h-7 text-slate-400" />
+              </div>
+              <p className="text-sm font-bold text-slate-700">No repositories yet</p>
+              <p className="text-xs text-slate-400 mt-1 mb-5">Index your first GitHub repo to start asking questions.</p>
+              <button
+                onClick={() => setShowForm(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition"
+              >
+                <Plus className="w-4 h-4" /> Index a Repository
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {repos.map(r => (
+                <RepoCard
+                  key={r.id}
+                  repo={r}
+                  onDelete={setDeleteTarget}
+                  onReindex={handleReindex}
+                  reindexingId={reindexingId}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Quick navigation to QA ─────────────────────────────────────── */}
+        {indexed > 0 && (
+          <a
+            href="/qa"
+            className={`${CARD} flex items-center justify-between px-6 py-4 hover:border-blue-200 hover:shadow-md transition group`}
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-        </div>
-
-        {loading ? (
-          <div className="space-y-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="bg-gray-100 rounded-xl h-16 animate-pulse" />
-            ))}
-          </div>
-        ) : repos.length === 0 ? (
-          <div className="text-center py-16 border border-dashed border-gray-200 rounded-2xl text-gray-400">
-            <GitBranch className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">No repositories yet.</p>
-            <p className="text-xs mt-1 text-gray-300">Use the form above to add one.</p>
-          </div>
-        ) : (
-          <div className="space-y-2.5">
-            {repos.map((r) => (
-              <RepoCard
-                key={r.id}
-                repo={r}
-                onDelete={setDeleteTarget}
-                onReindex={handleReindex}
-                reindexingId={reindexingId}
-              />
-            ))}
-          </div>
+            <div>
+              <p className="text-sm font-bold text-slate-900">Ready to ask questions?</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {indexed} repositor{indexed !== 1 ? "ies" : "y"} indexed and ready.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-blue-600 font-semibold text-sm">
+              Go to Q&A
+              <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+            </div>
+          </a>
         )}
       </div>
 
-      {/* ── Delete confirmation modal ────────────────────────────────────── */}
+      {/* Delete modal */}
       {deleteTarget && (
         <DeleteModal
           repo={deleteTarget}
           onConfirm={handleDeleteConfirm}
-          onCancel={() => { setDeleteTarget(null); setDeleteError(null); }}
-          deleting={deleting}
+          onCancel={() => setDeleteTarget(null)}
+          busy={deleting}
         />
       )}
     </div>
