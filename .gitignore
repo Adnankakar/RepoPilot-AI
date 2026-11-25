@@ -18,3 +18,6 @@ __pycache__/
 
 # Node modules
 node_modules/
+
+#assets
+# assets/
